@@ -91,7 +91,7 @@ vim.g.mapleader = ' '
 vim.g.maplocalleader = ' '
 
 -- Set to true if you have a Nerd Font installed and selected in the terminal
-vim.g.have_nerd_font = false
+vim.g.have_nerd_font = true
 
 -- [[ Setting options ]]
 -- See `:help vim.o`
@@ -102,7 +102,7 @@ vim.g.have_nerd_font = false
 vim.o.number = true
 -- You can also add relative line numbers, to help with jumping.
 --  Experiment for yourself to see if you like it!
--- vim.o.relativenumber = true
+vim.o.relativenumber = true
 
 -- Enable mouse mode, can be useful for resizing splits for example!
 vim.o.mouse = 'a'
@@ -256,6 +256,73 @@ rtp:prepend(lazypath)
 -- NOTE: Here is where you install your plugins.
 require('lazy').setup({
   -- NOTE: Plugins can be added via a link or github org/name. To run setup automatically, use `opts = {}`
+  {
+    'nickjvandyke/opencode.nvim',
+    version = '*', -- Latest stable release
+    dependencies = {
+      {
+        -- `snacks.nvim` integration is recommended, but optional
+        ---@module "snacks" <- Loads `snacks.nvim` types for configuration intellisense
+        'folke/snacks.nvim',
+        optional = true,
+        opts = {
+          input = {}, -- Enhances `ask()`
+          picker = { -- Enhances `select()`
+            actions = {
+              opencode_send = function(...) return require('opencode').snacks_picker_send(...) end,
+            },
+            win = {
+              input = {
+                keys = {
+                  ['<a-a>'] = { 'opencode_send', mode = { 'n', 'i' } },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    config = function()
+      ---@type opencode.Opts
+      vim.g.opencode_opts = {
+        -- Your configuration, if any; goto definition on the type or field for details
+      }
+
+      vim.o.autoread = true -- Required for `opts.events.reload`
+
+      -- Recommended/example keymaps
+      vim.keymap.set({ 'n', 'x' }, '<C-a>', function() require('opencode').ask('@this: ', { submit = true }) end, { desc = 'Ask opencode…' })
+      vim.keymap.set({ 'n', 'x' }, '<C-x>', function() require('opencode').select() end, { desc = 'Execute opencode action…' })
+      vim.keymap.set({ 'n', 't' }, '<leader>ot', function() require('opencode').toggle() end, { desc = 'Toggle opencode' })
+
+      vim.keymap.set({ 'n', 'x' }, 'go', function() return require('opencode').operator '@this ' end, { desc = 'Add range to opencode', expr = true })
+      vim.keymap.set('n', 'goo', function() return require('opencode').operator '@this ' .. '_' end, { desc = 'Add line to opencode', expr = true })
+
+      vim.keymap.set('n', '<S-C-u>', function() require('opencode').command 'session.half.page.up' end, { desc = 'Scroll opencode up' })
+      vim.keymap.set('n', '<S-C-d>', function() require('opencode').command 'session.half.page.down' end, { desc = 'Scroll opencode down' })
+
+      -- You may want these if you use the opinionated `<C-a>` and `<C-x>` keymaps above — otherwise consider `<leader>o…` (and remove terminal mode from the `toggle` keymap)
+      vim.keymap.set('n', '+', '<C-a>', { desc = 'Increment under cursor', noremap = true })
+      vim.keymap.set('n', '-', '<C-x>', { desc = 'Decrement under cursor', noremap = true })
+    end,
+  },
+  {
+    'NeogitOrg/neogit',
+    lazy = true,
+    dependencies = {
+      'nvim-lua/plenary.nvim', -- required
+
+      -- Only one of these is needed.
+      'sindrets/diffview.nvim', -- optional
+
+      -- Only one of these is needed.
+      'nvim-telescope/telescope.nvim', -- optional
+    },
+    cmd = 'Neogit',
+    keys = {
+      { '<leader>gg', '<cmd>Neogit<cr>', desc = 'Show Neogit UI' },
+    },
+  },
   { 'NMAC427/guess-indent.nvim', opts = {} },
 
   -- Alternatively, use `config = function() ... end` for full control over the configuration.
@@ -318,7 +385,7 @@ require('lazy').setup({
       spec = {
         { '<leader>s', group = '[S]earch', mode = { 'n', 'v' } },
         { '<leader>t', group = '[T]oggle' },
-        { '<leader>h', group = 'Git [H]unk', mode = { 'n', 'v' } }, -- Enable gitsigns recommended keymaps first
+        { '<leader>h', group = 'Git [H]unk', mode = { 'n', 'v' } },
         { 'gr', group = 'LSP Actions', mode = { 'n' } },
       },
     },
@@ -434,7 +501,8 @@ require('lazy').setup({
           -- Jump to the definition of the word under your cursor.
           -- This is where a variable was first declared, or where a function is defined, etc.
           -- To jump back, press <C-t>.
-          vim.keymap.set('n', 'grd', builtin.lsp_definitions, { buffer = buf, desc = '[G]oto [D]efinition' })
+          vim.keymap.set('n', 'gd', builtin.lsp_definitions, { buffer = buf, desc = '[G]oto [D]efinition (Telescope)' })
+          vim.keymap.set('n', 'grd', vim.lsp.buf.definition, { buffer = buf, desc = '[G]oto [D]efinition' })
 
           -- Fuzzy find all the symbols in your current document.
           -- Symbols are things like variables, functions, types, etc.
@@ -500,6 +568,9 @@ require('lazy').setup({
 
       -- Useful status updates for LSP.
       { 'j-hui/fidget.nvim', opts = {} },
+
+      -- Allows extra capabilities provided by blink.cmp
+      'saghen/blink.cmp',
     },
     config = function()
       -- Brief aside: **What is LSP?**
@@ -595,52 +666,66 @@ require('lazy').setup({
         end,
       })
 
-      -- Enable the following language servers
-      --  Feel free to add/remove any LSPs that you want here. They will automatically be installed.
-      --  See `:help lsp-config` for information about keys and how to configure
+      local vue_language_server_path = vim.fn.stdpath 'data' .. '/mason/packages/vue-language-server/node_modules/@vue/language-server'
+
+      local vue_plugin = {
+        name = '@vue/typescript-plugin',
+        location = vue_language_server_path,
+        languages = { 'vue' },
+        configNamespace = 'typescript',
+      }
+
+      --  See `:help lsp-config`
       ---@type table<string, vim.lsp.Config>
       local servers = {
         -- clangd = {},
-        -- gopls = {},
-        -- pyright = {},
-        -- rust_analyzer = {},
-        --
-        -- Some languages (like typescript) have entire language plugins that can be useful:
-        --    https://github.com/pmizio/typescript-tools.nvim
-        --
-        -- But for many setups, the LSP (`ts_ls`) will work just fine
-        -- ts_ls = {},
+        gopls = {},
+        kotlin_lsp = {},
+        ts_ls = {},
+        vue_ls = {},
+        vtsls = {
+          settings = {
+            vtsls = {
+              tsserver = {
+                globalPlugins = {
+                  vue_plugin,
+                },
+              },
+            },
+          },
+          filetypes = { 'typescript', 'javascript', 'javascriptreact', 'typescriptreact', 'vue' },
+        },
 
         stylua = {}, -- Used to format Lua code
 
         -- Special Lua Config, as recommended by neovim help docs
-        lua_ls = {
-          on_init = function(client)
-            if client.workspace_folders then
-              local path = client.workspace_folders[1].name
-              if path ~= vim.fn.stdpath 'config' and (vim.uv.fs_stat(path .. '/.luarc.json') or vim.uv.fs_stat(path .. '/.luarc.jsonc')) then return end
-            end
-
-            client.config.settings.Lua = vim.tbl_deep_extend('force', client.config.settings.Lua, {
-              runtime = {
-                version = 'LuaJIT',
-                path = { 'lua/?.lua', 'lua/?/init.lua' },
-              },
-              workspace = {
-                checkThirdParty = false,
-                -- NOTE: this is a lot slower and will cause issues when working on your own configuration.
-                --  See https://github.com/neovim/nvim-lspconfig/issues/3189
-                library = vim.tbl_extend('force', vim.api.nvim_get_runtime_file('', true), {
-                  '${3rd}/luv/library',
-                  '${3rd}/busted/library',
-                }),
-              },
-            })
-          end,
-          settings = {
-            Lua = {},
-          },
-        },
+        -- lua_ls = {
+        --   on_init = function(client)
+        --     if client.workspace_folders then
+        --       local path = client.workspace_folders[1].name
+        --       if path ~= vim.fn.stdpath 'config' and (vim.uv.fs_stat(path .. '/.luarc.json') or vim.uv.fs_stat(path .. '/.luarc.jsonc')) then return end
+        --     end
+        --
+        --     client.config.settings.Lua = vim.tbl_deep_extend('force', client.config.settings.Lua, {
+        --       runtime = {
+        --         version = 'LuaJIT',
+        --         path = { 'lua/?.lua', 'lua/?/init.lua' },
+        --       },
+        --       workspace = {
+        --         checkThirdParty = false,
+        --         -- NOTE: this is a lot slower and will cause issues when working on your own configuration.
+        --         --  See https://github.com/neovim/nvim-lspconfig/issues/3189
+        --         library = vim.tbl_extend('force', vim.api.nvim_get_runtime_file('', true), {
+        --           '${3rd}/luv/library',
+        --           '${3rd}/busted/library',
+        --         }),
+        --       },
+        --     })
+        --   end,
+        --   settings = {
+        --     Lua = {},
+        --   },
+        -- },
       }
 
       -- Ensure the servers and tools above are installed
@@ -661,6 +746,70 @@ require('lazy').setup({
         vim.lsp.config(name, server)
         vim.lsp.enable(name)
       end
+
+      local function detect_project_root()
+        local root_markers = {
+          'package.json',
+          'pnpm-lock.yaml',
+          'yarn.lock',
+          'package-lock.json',
+          'tsconfig.json',
+          'jsconfig.json',
+          'vite.config.ts',
+          'vite.config.js',
+          'vite.config.mts',
+          'vite.config.mjs',
+          'vue.config.js',
+          'nuxt.config.ts',
+          'nuxt.config.js',
+          '.git',
+        }
+
+        return vim.fs.root(0, root_markers) or vim.fn.getcwd()
+      end
+
+      local function has_client_for_root(name, root_dir)
+        for _, client in ipairs(vim.lsp.get_clients { name = name }) do
+          if client.config.root_dir == root_dir then return true end
+          if client.workspace_folders then
+            for _, folder in ipairs(client.workspace_folders) do
+              if folder.name == root_dir then return true end
+            end
+          end
+        end
+        return false
+      end
+
+      local function start_server_for_root(name, filetype, root_dir)
+        if has_client_for_root(name, root_dir) then return end
+
+        local config = vim.lsp.config[name]
+        if not config then return end
+
+        local buf = vim.api.nvim_create_buf(false, true)
+        vim.bo[buf].buftype = 'nofile'
+        vim.bo[buf].bufhidden = 'hide'
+        vim.bo[buf].swapfile = false
+        vim.bo[buf].filetype = filetype
+        vim.api.nvim_buf_set_name(buf, root_dir .. '/.nvim-lsp-' .. name)
+
+        local start_config = vim.tbl_deep_extend('force', config, { root_dir = root_dir })
+        vim.lsp.start(start_config, { bufnr = buf })
+      end
+
+      local function start_project_lsps()
+        local root_dir = detect_project_root()
+        if not root_dir then return end
+
+        start_server_for_root('vue_ls', 'vue', root_dir)
+        start_server_for_root('vtsls', 'vue', root_dir)
+        start_server_for_root('ts_ls', 'typescript', root_dir)
+      end
+
+      -- vim.api.nvim_create_autocmd({ 'VimEnter', 'DirChanged' }, {
+      --   group = vim.api.nvim_create_augroup('kickstart-lsp-autostart', { clear = true }),
+      --   callback = function() vim.schedule(start_project_lsps) end,
+      -- })
     end,
   },
 
@@ -914,7 +1063,7 @@ require('lazy').setup({
   -- require 'kickstart.plugins.lint',
   -- require 'kickstart.plugins.autopairs',
   -- require 'kickstart.plugins.neo-tree',
-  -- require 'kickstart.plugins.gitsigns', -- adds gitsigns recommended keymaps
+  -- require 'kickstart.plugins.gitsigns', -- adds gitsigns recommend keymaps
 
   -- NOTE: The import below can automatically add your own plugins, configuration, etc from `lua/custom/plugins/*.lua`
   --    This is the easiest way to modularize your config.
